@@ -1,0 +1,376 @@
+// IGMS Workspace data model
+// Generated incrementally — all models defined up front to lock the foundation.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  STAFF
+  CLIENT
+}
+
+enum ServiceArea {
+  CRM
+  CUSTOMER_SUPPORT
+  DESIGN
+  AFFILIATION
+  MARKETING
+  PAYMENTS_FRAUD
+}
+
+enum StaffLevel {
+  VIEWER
+  EDITOR
+  LEAD
+}
+
+enum ClientStatus {
+  PROSPECT
+  ACTIVE
+  PAUSED
+  CHURNED
+}
+
+enum ProjectStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  DONE
+}
+
+enum SpaceKind {
+  INTERNAL
+  CLIENT
+}
+
+enum PageVisibility {
+  AREA_RESTRICTED
+  ALL_STAFF
+  CLIENT_SHARED
+}
+
+enum AttachmentOwner {
+  CLIENT
+  PROJECT
+  PAGE
+}
+
+// ─────────────────────────────────────────────────────────────
+// Auth.js (NextAuth) models
+// ─────────────────────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Users + permissions
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String?
+  image          String?
+  emailVerified  DateTime?
+  hashedPassword String? // null for client-only (magic-link) users
+  role           Role      @default(STAFF)
+  clientId       String? // set when role = CLIENT
+  isActive       Boolean   @default(true)
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  client            Client?            @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  memberships       StaffMembership[]
+  ownedProjects     Project[]          @relation("ProjectOwner")
+  authoredNotes     ProjectNote[]
+  authoredPages     Page[]             @relation("PageAuthor")
+  editedPages       Page[]             @relation("PageEditor")
+  authoredActivity  ClientActivity[]
+  uploadedFiles     Attachment[]
+  activityLog       ActivityLog[]
+  accounts          Account[]
+  sessions          Session[]
+
+  @@index([role])
+  @@index([clientId])
+}
+
+model StaffMembership {
+  id        String      @id @default(cuid())
+  userId    String
+  area      ServiceArea
+  level     StaffLevel  @default(EDITOR)
+  createdAt DateTime    @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, area])
+  @@index([area])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Clients (CRM-lite)
+// ─────────────────────────────────────────────────────────────
+
+model Client {
+  id                   String        @id @default(cuid())
+  companyName          String
+  slug                 String        @unique
+  primaryContactName   String?
+  primaryContactEmail  String?
+  primaryContactPhone  String?
+  servicesContracted   ServiceArea[]
+  contractStart        DateTime?
+  contractEnd          DateTime?
+  billingNotes         String?       @db.Text
+  status               ClientStatus  @default(ACTIVE)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  users     User[]
+  contacts  ClientContact[]
+  activity  ClientActivity[]
+  projects  Project[]
+  spaces    Space[]
+  pageShares PageShare[]
+
+  @@index([status])
+}
+
+model ClientContact {
+  id        String   @id @default(cuid())
+  clientId  String
+  name      String
+  email     String?
+  phone     String?
+  role      String?
+  createdAt DateTime @default(now())
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+}
+
+model ClientActivity {
+  id        String   @id @default(cuid())
+  clientId  String
+  authorId  String
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id])
+
+  @@index([clientId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Projects
+// ─────────────────────────────────────────────────────────────
+
+model Project {
+  id          String        @id @default(cuid())
+  name        String
+  slug        String        @unique
+  status      ProjectStatus @default(NOT_STARTED)
+  ownerId     String?
+  clientId    String?
+  area        ServiceArea
+  dueDate     DateTime?
+  description String?       @db.Text
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  owner       User?              @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  client      Client?            @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  notes       ProjectNote[]
+  linkedPages ProjectPageLink[]
+
+  @@index([status])
+  @@index([clientId])
+  @@index([area])
+  @@index([dueDate])
+}
+
+model ProjectNote {
+  id        String   @id @default(cuid())
+  projectId String
+  authorId  String
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id])
+
+  @@index([projectId, createdAt])
+}
+
+model ProjectPageLink {
+  projectId String
+  pageId    String
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  page    Page    @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, pageId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Wiki (Spaces + Pages)
+// ─────────────────────────────────────────────────────────────
+
+model Space {
+  id          String     @id @default(cuid())
+  name        String
+  slug        String     @unique
+  description String?
+  kind        SpaceKind  @default(INTERNAL)
+  clientId    String? // set when kind = CLIENT
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  client Client? @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  pages  Page[]
+
+  @@index([kind])
+  @@index([clientId])
+}
+
+model Page {
+  id            String          @id @default(cuid())
+  spaceId       String
+  parentPageId  String?
+  title         String
+  slug          String
+  contentJson   Json? // TipTap JSON (canonical once Phase 4 ships)
+  contentHtml   String?         @db.Text // raw HTML — used by the Confluence importer + TipTap hydration
+  contentText   String?         @db.Text // denormalized plain text for FTS
+  externalSource String?        // e.g. "confluence:<pageId>" — set by the importer for traceability
+  visibility    PageVisibility  @default(ALL_STAFF)
+  area          ServiceArea? // required when visibility = AREA_RESTRICTED
+  authorId      String?
+  updatedById   String?
+  position      Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  space       Space             @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  parent      Page?             @relation("PageChildren", fields: [parentPageId], references: [id], onDelete: SetNull)
+  children    Page[]            @relation("PageChildren")
+  author      User?             @relation("PageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  updatedBy   User?             @relation("PageEditor", fields: [updatedById], references: [id], onDelete: SetNull)
+  tags        PageTag[]
+  shares      PageShare[]
+  linkedFrom  ProjectPageLink[]
+
+  @@unique([spaceId, slug])
+  @@index([spaceId, parentPageId])
+  @@index([visibility, area])
+}
+
+model PageTag {
+  pageId    String
+  tag       String
+
+  page Page @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@id([pageId, tag])
+  @@index([tag])
+}
+
+model PageShare {
+  pageId    String
+  clientId  String
+  createdAt DateTime @default(now())
+
+  page   Page   @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@id([pageId, clientId])
+  @@index([clientId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Files + Audit
+// ─────────────────────────────────────────────────────────────
+
+model Attachment {
+  id           String          @id @default(cuid())
+  ownerType    AttachmentOwner
+  ownerId      String
+  url          String
+  filename     String
+  mimeType     String
+  sizeBytes    Int
+  uploadedById String?
+  createdAt    DateTime        @default(now())
+
+  uploadedBy User? @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([ownerType, ownerId])
+}
+
+model ActivityLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String
+  payload    Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, createdAt])
+  @@index([userId, createdAt])
+}
