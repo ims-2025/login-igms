@@ -7,8 +7,11 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  // Vercel + Neon auto-inject these. POSTGRES_PRISMA_URL is the pooled URL
+  // (used at runtime); POSTGRES_URL_NON_POOLING is the direct connection
+  // used for migrations + introspection.
+  url       = env("POSTGRES_PRISMA_URL")
+  directUrl = env("POSTGRES_URL_NON_POOLING")
 }
 
 // ─────────────────────────────────────────────────────────────
