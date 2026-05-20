@@ -56,34 +56,50 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
   callbacks: {
     ...authConfig.callbacks,
     async jwt({ token, user }) {
+      const t = token as {
+        id?: string;
+        role?: unknown;
+        clientId?: string | null;
+        memberships?: unknown;
+      } & typeof token;
+
       // On sign-in, store the user id on the token.
       if (user?.id) {
-        token.id = user.id;
+        t.id = user.id;
       }
       // Hydrate role + memberships from DB if missing (runs in the Node API
       // route, not the Edge middleware).
-      if (token.id && (!token.role || !token.memberships)) {
+      if (t.id && (!t.role || !t.memberships)) {
         const dbUser = await prisma.user.findUnique({
-          where: { id: token.id as string },
+          where: { id: t.id },
           include: { memberships: true },
         });
         if (dbUser) {
-          token.role = dbUser.role;
-          token.clientId = dbUser.clientId;
-          token.memberships = dbUser.memberships.map((m) => ({
+          t.role = dbUser.role;
+          t.clientId = dbUser.clientId;
+          t.memberships = dbUser.memberships.map((m) => ({
             area: m.area,
             level: m.level,
           }));
         }
       }
-      return token;
+      return t;
     },
     async session({ session, token }) {
       if (token && session.user) {
-        session.user.id = token.id;
-        session.user.role = token.role;
-        session.user.clientId = token.clientId;
-        session.user.memberships = token.memberships ?? [];
+        // Auth.js v5's callback types treat JWT fields as `unknown` even with
+        // module augmentation, so we cast at this boundary. The shape is
+        // guaranteed by the jwt() callback above.
+        const t = token as {
+          id?: string;
+          role?: typeof session.user.role;
+          clientId?: string | null;
+          memberships?: typeof session.user.memberships;
+        };
+        session.user.id = t.id ?? "";
+        session.user.role = t.role ?? "STAFF";
+        session.user.clientId = t.clientId ?? null;
+        session.user.memberships = t.memberships ?? [];
       }
       return session;
     },
