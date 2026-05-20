@@ -1,4 +1,10 @@
-export { auth as middleware } from "@/auth";
+import NextAuth from "next-auth";
+import { authConfig } from "@/auth.config";
+
+// Middleware uses the Edge-safe config only. Heavy providers + DB-hydrating
+// callbacks live in src/auth.ts and run in the Node runtime via the API
+// handlers.
+export const { auth: middleware } = NextAuth(authConfig);
 
 export const config = {
   matcher: [

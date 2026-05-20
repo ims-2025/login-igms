@@ -1,21 +1,21 @@
-import NextAuth, { type NextAuthConfig } from "next-auth";
+import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Resend from "next-auth/providers/resend";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { authConfig } from "@/auth.config";
 
 const credentialsSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
 });
 
-export const authConfig = {
+export const { auth, handlers, signIn, signOut } = NextAuth({
+  ...authConfig,
   adapter: PrismaAdapter(prisma),
   session: { strategy: "jwt" },
-  pages: { signIn: "/login" },
-  trustHost: true,
   providers: [
     Credentials({
       name: "Email + Password",
@@ -54,11 +54,14 @@ export const authConfig = {
     }),
   ],
   callbacks: {
+    ...authConfig.callbacks,
     async jwt({ token, user }) {
-      // On sign-in, hydrate the JWT with role + memberships
+      // On sign-in, store the user id on the token.
       if (user?.id) {
         token.id = user.id;
       }
+      // Hydrate role + memberships from DB if missing (runs in the Node API
+      // route, not the Edge middleware).
       if (token.id && (!token.role || !token.memberships)) {
         const dbUser = await prisma.user.findUnique({
           where: { id: token.id as string },
@@ -84,13 +87,5 @@ export const authConfig = {
       }
       return session;
     },
-    authorized({ auth, request }) {
-      const { pathname } = request.nextUrl;
-      const publicPaths = ["/login", "/api/auth"];
-      if (publicPaths.some((p) => pathname.startsWith(p))) return true;
-      return !!auth?.user;
-    },
   },
-} satisfies NextAuthConfig;
-
-export const { auth, handlers, signIn, signOut } = NextAuth(authConfig);
+});
